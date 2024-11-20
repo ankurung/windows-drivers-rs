@@ -139,6 +139,10 @@ pub enum ConfigError {
          WDK drivers. The recommended solution is to add the following snippiet to a `.config.toml` file: See https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes for more ways to enable static crt linkage."
     )]
     StaticCRTNotEnabled,
+
+    /// Error returned when parsing Rust code fails
+    #[error("failed to parse Rust code: {0}")]
+    SynError(#[from] syn::Error),
 }
 
 /// Errors that could result from parsing a configuration from a [`wdk-build`]

@@ -39,6 +39,7 @@ const OUT_DIR_PLACEHOLDER: &str =
     "<PLACEHOLDER FOR LITERAL VALUE CONTAINING OUT_DIR OF wdk-sys CRATE>";
 const WDFFUNCTIONS_SYMBOL_NAME_PLACEHOLDER: &str =
     "<PLACEHOLDER FOR LITERAL VALUE CONTAINING WDFFUNCTIONS SYMBOL NAME>";
+const BINDINGS_CONTENTS_PLACEHOLDER: &str = "<PLACEHOLDER FOR BINDING CONTENTS>";
 
 const WDF_FUNCTION_COUNT_DECLARATION_EXTERNAL_SYMBOL: &str = "
         // SAFETY: `crate::WdfFunctionCount` is generated as a mutable static, but is not supposed \
@@ -46,7 +47,7 @@ const WDF_FUNCTION_COUNT_DECLARATION_EXTERNAL_SYMBOL: &str = "
         let wdf_function_count = unsafe { crate::WdfFunctionCount } as usize;";
 const WDF_FUNCTION_COUNT_DECLARATION_TABLE_INDEX: &str = "
         let wdf_function_count = crate::_WDFFUNCENUM::WdfFunctionTableNumEntries as usize;";
-
+        
 // FIXME: replace lazy_static with std::Lazy once available: https://github.com/rust-lang/rust/issues/109736
 lazy_static! {
     static ref WDF_FUNCTION_TABLE_TEMPLATE: String = format!(
@@ -135,6 +136,16 @@ use crate::WDFFUNC;
 pub static mut {WDFFUNCTIONS_SYMBOL_NAME_PLACEHOLDER}: *const WDFFUNC = core::ptr::null();
 "#,
     );
+    static ref BINDINGS_WITH_AUTOMOCK_TEMPLATE: String = format!(
+        r#"
+#[cfg_attr(feature = "test-stubs", mockall::automock)]
+mod generated_bindings {{
+use super::*;
+{BINDINGS_CONTENTS_PLACEHOLDER}
+}}
+pub use generated_bindings::*;
+"#,
+);
 }
 
 fn initialize_tracing() -> Result<(), ParseError> {
@@ -212,11 +223,17 @@ fn generate_base(out_path: &Path, config: &Config) -> Result<(), ConfigError> {
         DriverConfig::UMDF(_) => "windows.rs",
     };
 
-    Ok(bindgen::Builder::wdk_default(vec!["src/input.h"], config)?
+    let bindings = bindgen::Builder::wdk_default(vec!["src/input.h"], config)?
         .with_codegen_config((CodegenConfig::TYPES | CodegenConfig::VARS).complement())
         .generate()
         .expect("Bindings should succeed to generate")
-        .write_to_file(out_path.join(outfile_name))?)
+        .to_string();
+
+    let mock_enabled_bindings = BINDINGS_WITH_AUTOMOCK_TEMPLATE
+                                .replace(BINDINGS_CONTENTS_PLACEHOLDER, &bindings);
+    let syntax_tree = syn::parse_file(&mock_enabled_bindings).map_err(ConfigError::from)?;
+    let pretty_output = prettyplease::unparse(&syntax_tree);
+    Ok(std::fs::write(out_path.join(outfile_name), pretty_output)?)
 }
 
 fn generate_wdf(out_path: &Path, config: &Config) -> Result<(), ConfigError> {
