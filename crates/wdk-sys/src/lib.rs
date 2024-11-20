@@ -3,7 +3,7 @@
 
 //! Direct bindings to APIs available in the Windows Development Kit (WDK)
 
-#![no_std]
+#![cfg_attr(not(feature = "test-stubs"), no_std)]
 
 #[cfg(any(driver_type = "WDM", driver_type = "KMDF", driver_type = "UMDF"))]
 mod constants;
