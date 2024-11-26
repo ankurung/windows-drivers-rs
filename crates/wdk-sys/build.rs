@@ -286,7 +286,7 @@ fn generate_base(out_path: &Path, config: &Config) -> Result<(), ConfigError> {
     let mut non_mockable_bindings = String::new();
     
     for item in syntax_tree.items {
-        let is_non_muckable = match item {
+        let is_non_mockable = match item {
             Item::ForeignMod(ref foreign_mod) => {
                 foreign_mod.items.iter().any(|item| {
                     matches!(item, ForeignItem::Fn(ref func)
@@ -297,7 +297,7 @@ fn generate_base(out_path: &Path, config: &Config) -> Result<(), ConfigError> {
             _ => false,
         };
     
-        let target_bindings = if is_non_muckable {
+        let target_bindings = if is_non_mockable {
             &mut non_mockable_bindings
         } else {
             &mut mockable_bindings

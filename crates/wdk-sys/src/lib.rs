@@ -4,8 +4,6 @@
 //! Direct bindings to APIs available in the Windows Development Kit (WDK)
 
 #![cfg_attr(not(feature = "test-stubs"), no_std)]
-#![cfg_attr(feature = "nightly", feature(never_type))]
-#![cfg_attr(feature = "nightly", feature(c_variadic))]
 
 #[cfg(any(driver_type = "WDM", driver_type = "KMDF", driver_type = "UMDF"))]
 mod constants;
