@@ -19,6 +19,8 @@ use tracing_subscriber::{
     filter::{LevelFilter, ParseError},
     EnvFilter,
 };
+use syn::{parse_file, Item, ItemFn, ReturnType, Type, ForeignItem, ForeignItemFn};
+use syn::__private::ToTokens;
 use wdk_build::{
     find_top_level_cargo_manifest,
     BuilderExt,
@@ -217,6 +219,50 @@ fn generate_types(out_path: &Path, config: &Config) -> Result<(), ConfigError> {
         .write_to_file(out_path.join("types.rs"))?)
 }
 
+// Trait for exclusion patterns
+trait ExclusionPattern {
+    fn matches(&self, func: &ItemFn) -> bool;
+    fn matches_foreign_fn(&self, func: &ForeignItemFn) -> bool;
+}
+
+// Pattern to exclude functions with `-> !`
+struct NeverReturnPattern;
+impl ExclusionPattern for NeverReturnPattern {
+    fn matches(&self, func: &ItemFn) -> bool {
+        matches!(func.sig.output, ReturnType::Type(_, ref ty) if matches!(**ty, Type::Never(_)))
+    }
+    
+    fn matches_foreign_fn(&self, func: &ForeignItemFn) -> bool {
+        matches!(func.sig.output, ReturnType::Type(_, ref ty) if matches!(**ty, Type::Never(_)))
+    }
+}
+
+// Pattern to exclude variadic functions
+struct CVariadicPattern;
+impl ExclusionPattern for CVariadicPattern {
+    fn matches(&self, func: &ItemFn) -> bool {
+        func.sig.variadic.is_some()
+    }
+    
+    fn matches_foreign_fn(&self, func: &ForeignItemFn) -> bool {
+        func.sig.variadic.is_some()
+    }
+}
+
+fn get_extension(file_name: &str) -> &str {
+    file_name.rsplit_once('.').map_or("rs", |(_, ext)| ext)
+}
+
+fn extract_base_and_extension(file_name: &str) -> (&str, &str) {
+    if let Some(dot_pos) = file_name.rfind('.') {
+        let base = &file_name[..dot_pos];
+        let extension = &file_name[dot_pos + 1..];
+        (base, extension)
+    } else {
+        (file_name,"rs") // Return rs as extension
+    }
+}
+
 fn generate_base(out_path: &Path, config: &Config) -> Result<(), ConfigError> {
     let outfile_name = match &config.driver_config {
         DriverConfig::WDM | DriverConfig::KMDF(_) => "ntddk.rs",
@@ -229,9 +275,49 @@ fn generate_base(out_path: &Path, config: &Config) -> Result<(), ConfigError> {
         .expect("Bindings should succeed to generate")
         .to_string();
 
+    let exclusion_patterns: Vec<Box<dyn ExclusionPattern>> = vec![
+        Box::new(NeverReturnPattern),  // Exclude functions returning `!`
+        Box::new(CVariadicPattern),    // Exclude functions with variadic arguments
+    ];
+
+    let syntax_tree = syn::parse_file(&bindings).map_err(ConfigError::from)?;
+
+    let mut mockable_bindings = String::new();
+    let mut non_mockable_bindings = String::new();
+    
+    for item in syntax_tree.items {
+        let is_non_muckable = match item {
+            Item::ForeignMod(ref foreign_mod) => {
+                foreign_mod.items.iter().any(|item| {
+                    matches!(item, ForeignItem::Fn(ref func)
+                        if exclusion_patterns.iter().any(|pattern| pattern.matches_foreign_fn(func)))
+                })
+            }
+            Item::Fn(ref func) => exclusion_patterns.iter().any(|pattern| pattern.matches(func)),
+            _ => false,
+        };
+    
+        let target_bindings = if is_non_muckable {
+            &mut non_mockable_bindings
+        } else {
+            &mut mockable_bindings
+        };
+        
+        target_bindings.push_str(&item.to_token_stream().to_string());
+        target_bindings.push('\n');
+    }
+
+    // Generate bindings with automock attribute.
     let mock_enabled_bindings = BINDINGS_WITH_AUTOMOCK_TEMPLATE
-                                .replace(BINDINGS_CONTENTS_PLACEHOLDER, &bindings);
+                                .replace(BINDINGS_CONTENTS_PLACEHOLDER, &mockable_bindings);
     let syntax_tree = syn::parse_file(&mock_enabled_bindings).map_err(ConfigError::from)?;
+    let pretty_output = prettyplease::unparse(&syntax_tree);
+    let (base, extension) = extract_base_and_extension(outfile_name);
+    let mocked_output_name = format!("{}_mocked.{}", base, extension);
+    std::fs::write(out_path.join(mocked_output_name), pretty_output)?;
+
+    // Generate bindings without automock attribute.
+    let syntax_tree = syn::parse_file(&non_mockable_bindings).map_err(ConfigError::from)?;
     let pretty_output = prettyplease::unparse(&syntax_tree);
     Ok(std::fs::write(out_path.join(outfile_name), pretty_output)?)
 }

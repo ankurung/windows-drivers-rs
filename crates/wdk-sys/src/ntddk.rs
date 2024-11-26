@@ -15,5 +15,7 @@ mod bindings {
     use crate::types::*;
 
     include!(concat!(env!("OUT_DIR"), "/ntddk.rs"));
+
+    include!(concat!(env!("OUT_DIR"), "/ntddk_mocked.rs"));
 }
 pub use bindings::*;
