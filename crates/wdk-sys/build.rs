@@ -19,7 +19,7 @@ use tracing_subscriber::{
     filter::{LevelFilter, ParseError},
     EnvFilter,
 };
-use syn::{parse_file, Item, ItemFn, ReturnType, Type, ForeignItem, ForeignItemFn};
+use syn::{Item, ItemFn, ReturnType, Type, ForeignItem, ForeignItemFn};
 use syn::__private::ToTokens;
 use wdk_build::{
     find_top_level_cargo_manifest,
@@ -249,11 +249,7 @@ impl ExclusionPattern for CVariadicPattern {
     }
 }
 
-fn get_extension(file_name: &str) -> &str {
-    file_name.rsplit_once('.').map_or("rs", |(_, ext)| ext)
-}
-
-fn extract_base_and_extension(file_name: &str) -> (&str, &str) {
+fn extract_file_root_and_extension(file_name: &str) -> (&str, &str) {
     if let Some(dot_pos) = file_name.rfind('.') {
         let base = &file_name[..dot_pos];
         let extension = &file_name[dot_pos + 1..];
@@ -312,7 +308,7 @@ fn generate_base(out_path: &Path, config: &Config) -> Result<(), ConfigError> {
                                 .replace(BINDINGS_CONTENTS_PLACEHOLDER, &mockable_bindings);
     let syntax_tree = syn::parse_file(&mock_enabled_bindings).map_err(ConfigError::from)?;
     let pretty_output = prettyplease::unparse(&syntax_tree);
-    let (base, extension) = extract_base_and_extension(outfile_name);
+    let (base, extension) = extract_file_root_and_extension(outfile_name);
     let mocked_output_name = format!("{}_mocked.{}", base, extension);
     std::fs::write(out_path.join(mocked_output_name), pretty_output)?;
 
